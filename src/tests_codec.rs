@@ -22,9 +22,8 @@ mod nmea_ext {
     /// built-in decoder's coordinate conversion within f64 rounding.
     #[test]
     fn external_crate_decodes_deframed_gga() {
-        let line = last_line_of(
-            "GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,",
-        );
+        let line =
+            last_line_of("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,");
         let ParseResult::GGA(gga) = codec::nmea::decode(&line).unwrap() else {
             panic!("expected GGA");
         };
@@ -40,9 +39,7 @@ mod nmea_ext {
     /// canonical use of the adapter: NmeaOther + external decode.
     #[test]
     fn external_crate_decodes_gsv_we_dont() {
-        let line = last_line_of(
-            "GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,",
-        );
+        let line = last_line_of("GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,");
         match codec::nmea::decode(&line) {
             Ok(ParseResult::GSV(_)) => {}
             other => panic!("expected GSV, got {other:?}"),
@@ -73,7 +70,11 @@ mod ublox_ext {
         p[24..28].copy_from_slice(&61432160i32.to_le_bytes());
         p[28..32].copy_from_slice(&462025986i32.to_le_bytes());
 
-        let mut gps = NeoGps::new(MockUart::new(ubx_wire(ubx_int::CLASS_NAV, ubx_int::NAV_PVT, &p)));
+        let mut gps = NeoGps::new(MockUart::new(ubx_wire(
+            ubx_int::CLASS_NAV,
+            ubx_int::NAV_PVT,
+            &p,
+        )));
         block_on(gps.next_event()).unwrap();
         let frame = gps.last_ubx_frame().to_vec();
 
@@ -97,9 +98,16 @@ mod ublox_ext {
     /// see the same PROTVER our probe classification uses.
     #[test]
     fn external_crate_reads_mon_ver_extensions() {
-        let payload = mon_ver_payload("ROM CORE 3.01 (107888)", "00080000",
-                                      &["FWVER=SPG 3.01", "PROTVER=18.00"]);
-        let mut gps = NeoGps::new(MockUart::new(ubx_wire(ubx_int::CLASS_MON, ubx_int::MON_VER, &payload)));
+        let payload = mon_ver_payload(
+            "ROM CORE 3.01 (107888)",
+            "00080000",
+            &["FWVER=SPG 3.01", "PROTVER=18.00"],
+        );
+        let mut gps = NeoGps::new(MockUart::new(ubx_wire(
+            ubx_int::CLASS_MON,
+            ubx_int::MON_VER,
+            &payload,
+        )));
         block_on(gps.next_event()).unwrap();
         let frame = gps.last_ubx_frame().to_vec();
 

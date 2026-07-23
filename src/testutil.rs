@@ -3,7 +3,6 @@
 
 use crate::*;
 
-
 /// Build a wire-format NMEA sentence with a computed checksum.
 pub(crate) fn nmea_wire(body: &str) -> Vec<u8> {
     let ck = body.bytes().fold(0u8, |a, b| a ^ b);
@@ -31,7 +30,6 @@ pub(crate) fn feed(bytes: &[u8]) -> Vec<Event> {
     bytes.iter().filter_map(|&b| d.push(b)).collect()
 }
 
-
 /// Build a MON-VER payload: 30-byte swVersion, 10-byte hwVersion,
 /// N x 30-byte NUL-padded extension strings (per the interface description).
 pub(crate) fn mon_ver_payload(sw: &str, hw: &str, exts: &[&str]) -> Vec<u8> {
@@ -45,7 +43,6 @@ pub(crate) fn mon_ver_payload(sw: &str, hw: &str, exts: &[&str]) -> Vec<u8> {
     }
     p
 }
-
 
 /// Scripted duplex mock: serves `rx` in small chunks, records writes.
 pub(crate) struct MockUart {
@@ -64,7 +61,15 @@ pub(crate) struct MockUart {
 
 impl MockUart {
     pub(crate) fn new(rx: Vec<u8>) -> Self {
-        MockUart { rx, pos: 0, tx: Vec::new(), chunk: 7, fail_next_reads: 0, fail_on_reads: Vec::new(), reads: 0 }
+        MockUart {
+            rx,
+            pos: 0,
+            tx: Vec::new(),
+            chunk: 7,
+            fail_next_reads: 0,
+            fail_on_reads: Vec::new(),
+            reads: 0,
+        }
     }
 }
 
@@ -127,8 +132,7 @@ pub(crate) fn block_on<F: core::future::Future>(mut fut: F) -> F::Output {
     fn raw() -> RawWaker {
         RawWaker::new(core::ptr::null(), &VT)
     }
-    static VT: RawWakerVTable =
-        RawWakerVTable::new(|_| raw(), |_| {}, |_| {}, |_| {});
+    static VT: RawWakerVTable = RawWakerVTable::new(|_| raw(), |_| {}, |_| {}, |_| {});
     let waker = unsafe { Waker::from_raw(raw()) };
     let mut cx = Context::from_waker(&waker);
     let mut fut = unsafe { core::pin::Pin::new_unchecked(&mut fut) };
@@ -138,7 +142,6 @@ pub(crate) fn block_on<F: core::future::Future>(mut fut: F) -> F::Output {
         }
     }
 }
-
 
 impl<S> NeoGps<S> {
     /// Test-only shared access to the wrapped stream.

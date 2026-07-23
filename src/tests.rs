@@ -37,7 +37,14 @@ fn rmc_neo6m() {
         panic!("expected RMC");
     };
     assert!(r.valid);
-    assert_eq!(r.date, Some(nmea::Date { day: 9, month: 12, year: 2 }));
+    assert_eq!(
+        r.date,
+        Some(nmea::Date {
+            day: 9,
+            month: 12,
+            year: 2
+        })
+    );
     // 0.004 knots ≈ 2.06 mm/s → rounds to 2
     assert_eq!(r.speed_mm_s, Some(2));
     assert_eq!(r.course_1e5, Some(7_752_000));
@@ -70,13 +77,22 @@ fn rmc_neo8m_nmea41_extra_field() {
         panic!("expected RMC");
     };
     assert!(r.valid);
-    assert_eq!(r.date, Some(nmea::Date { day: 13, month: 5, year: 22 }));
+    assert_eq!(
+        r.date,
+        Some(nmea::Date {
+            day: 13,
+            month: 5,
+            year: 22
+        })
+    );
 }
 
 #[test]
 fn gsa_and_unknown_sentences() {
     let mut bytes = nmea_wire("GNGSA,A,3,80,71,73,79,69,,,,,,,,1.83,1.09,1.47");
-    bytes.extend(nmea_wire("GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,"));
+    bytes.extend(nmea_wire(
+        "GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,",
+    ));
     let evs = feed(&bytes);
     assert_eq!(evs.len(), 2);
     let Event::Nmea(nmea::Sentence::Gsa(g)) = evs[0] else {
@@ -89,7 +105,10 @@ fn gsa_and_unknown_sentences() {
     // GSV is valid but undecoded → NmeaOther with preserved talker
     assert_eq!(
         evs[1],
-        Event::NmeaOther { talker: *b"GL", mtype: *b"GSV" }
+        Event::NmeaOther {
+            talker: *b"GL",
+            mtype: *b"GSV"
+        }
     );
 }
 
@@ -108,7 +127,8 @@ fn empty_fields_and_no_fix() {
 
 #[test]
 fn bad_checksum_rejected() {
-    let mut bytes = nmea_wire("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,");
+    let mut bytes =
+        nmea_wire("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,");
     let star = bytes.iter().rposition(|&b| b == b'*').unwrap();
     bytes[star + 1] = b'0'; // corrupt checksum
     bytes[star + 2] = b'0';
@@ -130,7 +150,10 @@ fn resync_after_garbage() {
 fn ubx_frame_checksum_known_vector() {
     // CFG-RATE poll (empty payload): B5 62 06 08 00 00 0E 30
     let mut f = UbxFrame::new(0x06, 0x08);
-    assert_eq!(f.finish(), &[0xB5, 0x62, 0x06, 0x08, 0x00, 0x00, 0x0E, 0x30]);
+    assert_eq!(
+        f.finish(),
+        &[0xB5, 0x62, 0x06, 0x08, 0x00, 0x00, 0x0E, 0x30]
+    );
 }
 
 #[test]
@@ -141,8 +164,16 @@ fn ubx_ack_and_nak() {
     assert_eq!(
         evs,
         vec![
-            Event::Ack { class: 0x06, id: 0x08, ok: true },
-            Event::Ack { class: 0x06, id: 0x3E, ok: false },
+            Event::Ack {
+                class: 0x06,
+                id: 0x08,
+                ok: true
+            },
+            Event::Ack {
+                class: 0x06,
+                id: 0x3E,
+                ok: false
+            },
         ]
     );
 }
@@ -206,15 +237,24 @@ fn mon_ver_protver_variants() {
         Some(15)
     );
     // NEO-6: no PROTVER extension at all
-    assert_eq!(ubx::parse_mon_ver_protver(&payload(&["7.03 (45969)"])), None);
+    assert_eq!(
+        ubx::parse_mon_ver_protver(&payload(&["7.03 (45969)"])),
+        None
+    );
 }
 
 // -- capabilities ----------------------------------------------------------
 
 #[test]
 fn capability_gating() {
-    let six = Capabilities { generation: Generation::Series6, protocol_version: 12 };
-    let eight = Capabilities { generation: Generation::Series8, protocol_version: 18 };
+    let six = Capabilities {
+        generation: Generation::Series6,
+        protocol_version: 12,
+    };
+    let eight = Capabilities {
+        generation: Generation::Series8,
+        protocol_version: 18,
+    };
     assert!(!six.has_nav_pvt());
     assert!(!six.has_cfg_gnss());
     assert_eq!(six.max_rate_ms(), 200);
@@ -232,10 +272,15 @@ fn probe_detects_series8_then_set_rate_acked() {
     ext[..13].copy_from_slice(b"PROTVER=18.00");
     mon_ver.extend_from_slice(&ext);
 
-    let mut rx = nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,");
+    let mut rx =
+        nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,");
     rx.extend(ubx_wire(ubx::CLASS_MON, ubx::MON_VER, &mon_ver));
     rx.extend(nmea_wire("GNGSA,A,3,80,71,,,,,,,,,,,1.83,1.09,1.47"));
-    rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_RATE]));
+    rx.extend(ubx_wire(
+        ubx::CLASS_ACK,
+        0x01,
+        &[ubx::CLASS_CFG, ubx::CFG_RATE],
+    ));
 
     let mut gps = NeoGps::new(MockUart::new(rx));
 
@@ -252,7 +297,10 @@ fn probe_detects_series8_then_set_rate_acked() {
         .windows(4)
         .position(|w| w == [0xB5, 0x62, 0x06, 0x08])
         .expect("CFG-RATE frame sent");
-    assert_eq!(&sent[cfg_rate_pos + 6..cfg_rate_pos + 8], &100u16.to_le_bytes());
+    assert_eq!(
+        &sent[cfg_rate_pos + 6..cfg_rate_pos + 8],
+        &100u16.to_le_bytes()
+    );
 }
 
 #[test]
@@ -267,7 +315,13 @@ fn nak_surfaces_as_error() {
     let rx = ubx_wire(ubx::CLASS_ACK, 0x00, &[ubx::CLASS_CFG, ubx::CFG_GNSS]);
     let mut gps = NeoGps::new(MockUart::new(rx));
     let r = block_on(gps.send_cfg_acked(ubx::CFG_GNSS, &[]));
-    assert_eq!(r, Err(Error::Nak { class: 0x06, id: 0x3E }));
+    assert_eq!(
+        r,
+        Err(Error::Nak {
+            class: 0x06,
+            id: 0x3E
+        })
+    );
 }
 
 // -- raw-frame accessors ---------------------------------------------------
@@ -280,7 +334,13 @@ fn raw_ubx_payload_accessible_after_ubx_other() {
     let mut gps = NeoGps::new(MockUart::new(rx));
 
     let ev = block_on(gps.next_event()).unwrap();
-    assert_eq!(ev, Event::UbxOther { class: 0x01, id: 0x35 });
+    assert_eq!(
+        ev,
+        Event::UbxOther {
+            class: 0x01,
+            id: 0x35
+        }
+    );
     assert_eq!(gps.last_ubx_payload(), &payload);
 }
 
@@ -292,7 +352,13 @@ fn raw_nmea_line_accessible_after_nmea_other() {
     let mut gps = NeoGps::new(MockUart::new(rx));
 
     let ev = block_on(gps.next_event()).unwrap();
-    assert_eq!(ev, Event::NmeaOther { talker: *b"GL", mtype: *b"GSV" });
+    assert_eq!(
+        ev,
+        Event::NmeaOther {
+            talker: *b"GL",
+            mtype: *b"GSV"
+        }
+    );
     // Accessor returns body + "*hh" checksum trailer, no $ or CR/LF.
     let line = gps.last_nmea_line();
     assert!(line.starts_with(body.as_bytes()));
@@ -303,7 +369,8 @@ fn raw_nmea_line_accessible_after_nmea_other() {
 fn corrupt_line_does_not_clobber_retained_sentence() {
     let good = "GLGSV,3,1,09,65,04,037,,66,55,061,20,,,,";
     let mut rx = nmea_wire(good);
-    let mut bad = nmea_wire("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,");
+    let mut bad =
+        nmea_wire("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,");
     let n = bad.len();
     bad[n - 4] = b'0'; // corrupt checksum
     bad[n - 3] = b'0';

@@ -15,7 +15,11 @@ use crate::*;
 
 /// Run `probe()` against a scripted MON-VER reply and return the result.
 fn probe_with(exts: &[&str], sw: &str) -> Capabilities {
-    let rx = ubx_wire(ubx::CLASS_MON, ubx::MON_VER, &mon_ver_payload(sw, "00080000", exts));
+    let rx = ubx_wire(
+        ubx::CLASS_MON,
+        ubx::MON_VER,
+        &mon_ver_payload(sw, "00080000", exts),
+    );
     let mut gps = NeoGps::new(MockUart::new(rx));
     block_on(gps.probe()).unwrap()
 }
@@ -43,20 +47,46 @@ mod neo6 {
     #[test]
     fn full_default_sentence_cycle() {
         let mut rx = Vec::new();
-        rx.extend(nmea_wire("GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,"));
+        rx.extend(nmea_wire(
+            "GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,",
+        ));
         rx.extend(nmea_wire("GPGLL,4717.11364,N,00833.91565,E,092321.00,A,A"));
-        rx.extend(nmea_wire("GPGSA,A,3,29,26,31,21,25,16,05,,,,,,2.08,1.29,1.63"));
-        rx.extend(nmea_wire("GPGSV,3,1,10,05,17,222,25,10,05,074,,16,35,296,29,21,29,067,32"));
-        rx.extend(nmea_wire("GPRMC,083559.00,A,4717.11437,N,00833.91522,E,0.004,77.52,091202,,,A"));
+        rx.extend(nmea_wire(
+            "GPGSA,A,3,29,26,31,21,25,16,05,,,,,,2.08,1.29,1.63",
+        ));
+        rx.extend(nmea_wire(
+            "GPGSV,3,1,10,05,17,222,25,10,05,074,,16,35,296,29,21,29,067,32",
+        ));
+        rx.extend(nmea_wire(
+            "GPRMC,083559.00,A,4717.11437,N,00833.91522,E,0.004,77.52,091202,,,A",
+        ));
         rx.extend(nmea_wire("GPVTG,77.52,T,,M,0.004,N,0.007,K,A"));
         let evs = feed(&rx);
         assert_eq!(evs.len(), 6);
         assert!(matches!(evs[0], Event::Nmea(nmea::Sentence::Gga(_))));
-        assert_eq!(evs[1], Event::NmeaOther { talker: *b"GP", mtype: *b"GLL" });
+        assert_eq!(
+            evs[1],
+            Event::NmeaOther {
+                talker: *b"GP",
+                mtype: *b"GLL"
+            }
+        );
         assert!(matches!(evs[2], Event::Nmea(nmea::Sentence::Gsa(_))));
-        assert_eq!(evs[3], Event::NmeaOther { talker: *b"GP", mtype: *b"GSV" });
+        assert_eq!(
+            evs[3],
+            Event::NmeaOther {
+                talker: *b"GP",
+                mtype: *b"GSV"
+            }
+        );
         assert!(matches!(evs[4], Event::Nmea(nmea::Sentence::Rmc(_))));
-        assert_eq!(evs[5], Event::NmeaOther { talker: *b"GP", mtype: *b"VTG" });
+        assert_eq!(
+            evs[5],
+            Event::NmeaOther {
+                talker: *b"GP",
+                mtype: *b"VTG"
+            }
+        );
     }
 
     /// NMEA 2.3 RMC ends with the mode indicator (no navStatus field).
@@ -66,9 +96,18 @@ mod neo6 {
         let evs = feed(&nmea_wire(
             "GPRMC,162254.00,A,3723.02837,N,12159.39853,W,0.820,188.36,110706,,,A",
         ));
-        let Event::Nmea(nmea::Sentence::Rmc(r)) = evs[0] else { panic!() };
+        let Event::Nmea(nmea::Sentence::Rmc(r)) = evs[0] else {
+            panic!()
+        };
         assert!(r.valid);
-        assert_eq!(r.date, Some(nmea::Date { day: 11, month: 7, year: 6 }));
+        assert_eq!(
+            r.date,
+            Some(nmea::Date {
+                day: 11,
+                month: 7,
+                year: 6
+            })
+        );
         assert!(r.lon_1e7.unwrap() < 0);
     }
 
@@ -77,21 +116,30 @@ mod neo6 {
     #[test]
     fn boot_txt_sentences_pass_through() {
         let evs = feed(&nmea_wire("GPTXT,01,01,02,u-blox ag - www.u-blox.com"));
-        assert_eq!(evs[0], Event::NmeaOther { talker: *b"GP", mtype: *b"TXT" });
+        assert_eq!(
+            evs[0],
+            Event::NmeaOther {
+                talker: *b"GP",
+                mtype: *b"TXT"
+            }
+        );
     }
 
     /// Feature gating: enable_nav_pvt must fail locally on a probed 6-series,
     /// without touching the wire.
     #[test]
     fn nav_pvt_refused_without_io() {
-        let rx = ubx_wire(ubx::CLASS_MON, ubx::MON_VER, &mon_ver_payload("7.03 (45969)", "00040007", &[]));
+        let rx = ubx_wire(
+            ubx::CLASS_MON,
+            ubx::MON_VER,
+            &mon_ver_payload("7.03 (45969)", "00040007", &[]),
+        );
         let mut gps = NeoGps::new(MockUart::new(rx));
         block_on(gps.probe()).unwrap();
         let tx_before = gps.free_len_tx();
         assert_eq!(block_on(gps.enable_nav_pvt()), Err(Error::Unsupported));
         assert_eq!(gps.free_len_tx(), tx_before, "no bytes may be sent");
     }
-
 
     /// NAV-POSLLH (28 bytes, GPS.G6-SW-10018 §35.6): the 6-series binary
     /// position message. Offsets: lon@4, lat@8, height@12, hMSL@16,
@@ -105,7 +153,9 @@ mod neo6 {
         p[16..20].copy_from_slice(&499_600i32.to_le_bytes()); // hMSL 499.6 m
         p[20..24].copy_from_slice(&2500u32.to_le_bytes()); // hAcc 2.5 m
         let evs = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_POSLLH, &p));
-        let Event::NavPosllh(pos) = evs[0] else { panic!("{:?}", evs[0]) };
+        let Event::NavPosllh(pos) = evs[0] else {
+            panic!("{:?}", evs[0])
+        };
         assert_eq!(pos.lat_1e7, 472852332);
         assert_eq!(pos.lon_1e7, 85652650);
         assert_eq!(pos.hmsl_mm, 499_600);
@@ -123,8 +173,9 @@ mod neo6 {
         p[24..28].copy_from_slice(&310u32.to_le_bytes()); // pAcc 3.10 m
         p[44..46].copy_from_slice(&180u16.to_le_bytes()); // pDOP 1.80
         p[47] = 7;
-        let Event::NavSol(sol) = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_SOL, &p))[0]
-        else { panic!() };
+        let Event::NavSol(sol) = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_SOL, &p))[0] else {
+            panic!()
+        };
         assert_eq!(sol.gps_fix, 3);
         assert!(sol.gps_fix_ok());
         assert_eq!(sol.week, 2374);
@@ -137,17 +188,34 @@ mod neo6 {
     #[test]
     fn nav_sol_short_degrades() {
         let evs = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_SOL, &[0u8; 40]));
-        assert_eq!(evs[0], Event::UbxOther { class: ubx::CLASS_NAV, id: ubx::NAV_SOL });
+        assert_eq!(
+            evs[0],
+            Event::UbxOther {
+                class: ubx::CLASS_NAV,
+                id: ubx::NAV_SOL
+            }
+        );
     }
 
     /// enable_binary_nav on a probed 6-series must fall back to
     /// POSLLH + SOL (two CFG-MSG frames), since NAV-PVT doesn't exist.
     #[test]
     fn binary_nav_routes_to_posllh_sol_on_series6() {
-        let mut rx = ubx_wire(ubx::CLASS_MON, ubx::MON_VER,
-            &mon_ver_payload("7.03 (45969)", "00040007", &[]));
-        rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_MSG]));
-        rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_MSG]));
+        let mut rx = ubx_wire(
+            ubx::CLASS_MON,
+            ubx::MON_VER,
+            &mon_ver_payload("7.03 (45969)", "00040007", &[]),
+        );
+        rx.extend(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_MSG],
+        ));
+        rx.extend(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_MSG],
+        ));
         let mut gps = NeoGps::new(MockUart::new(rx));
         block_on(gps.probe()).unwrap();
         block_on(gps.enable_binary_nav()).unwrap();
@@ -155,19 +223,27 @@ mod neo6 {
         let tx = &gps.uart_ref().tx;
         for id in [ubx::NAV_POSLLH, ubx::NAV_SOL] {
             let payload = [ubx::CLASS_NAV, id, 1];
-            assert!(tx.windows(3).any(|w| w == payload), "CFG-MSG for 0x{id:02X} missing");
+            assert!(
+                tx.windows(3).any(|w| w == payload),
+                "CFG-MSG for 0x{id:02X} missing"
+            );
         }
-        assert!(!tx.windows(3).any(|w| w == [ubx::CLASS_NAV, ubx::NAV_PVT, 1]),
-                "must not try NAV-PVT on a 6-series");
+        assert!(
+            !tx.windows(3)
+                .any(|w| w == [ubx::CLASS_NAV, ubx::NAV_PVT, 1]),
+            "must not try NAV-PVT on a 6-series"
+        );
     }
 
     /// 5 Hz (200 ms) is the fastest CFG-RATE the 6-series sustains; the
     /// driver must accept 200 and reject anything faster.
     #[test]
     fn rate_limits() {
-        let mut gps = NeoGps::new(MockUart::new(
-            ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_RATE]),
-        ));
+        let mut gps = NeoGps::new(MockUart::new(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_RATE],
+        )));
         assert_eq!(block_on(gps.set_nav_rate_ms(100)), Err(Error::Unsupported));
         block_on(gps.set_nav_rate_ms(200)).unwrap();
     }
@@ -215,7 +291,13 @@ mod neo7 {
     #[test]
     fn nav_pvt_shorter_than_84_degrades() {
         let evs = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_PVT, &[0u8; 76]));
-        assert_eq!(evs[0], Event::UbxOther { class: ubx::CLASS_NAV, id: ubx::NAV_PVT });
+        assert_eq!(
+            evs[0],
+            Event::UbxOther {
+                class: ubx::CLASS_NAV,
+                id: ubx::NAV_PVT
+            }
+        );
     }
 
     /// In GLONASS-only mode the 7-series talks with the GL talker; sentences
@@ -242,11 +324,36 @@ mod neo8 {
     fn firmware_protocol_version_table() {
         for (exts, sw, protver) in [
             (&["PROTVER 15.00"][..], "2.01 (75331)", 15), // SPG 2.01, ROM
-            (&["ROM BASE 3.01 (107888)", "FWVER=SPG 3.01", "PROTVER=18.00", "MOD=NEO-M8N-0"][..], "EXT CORE 3.01 (107900)", 18), // SPG 3.01, Flash
-            (&["FWVER=SPG 3.50", "PROTVER=23.00"][..], "EXT CORE 3.50 (190461)", 23),
-            (&["FWVER=SPG 3.51", "PROTVER=23.01"][..], "ROM CORE 3.51 (19dc23)", 23),
-            (&["FWVER=HPG 1.40", "PROTVER=20.30"][..], "EXT CORE 3.01 (db0c89)", 20), // NEO-M8P RTK
-            (&["FWVER=TIM 1.10", "PROTVER=22.00"][..], "EXT CORE 3.01 (111141)", 22), // NEO-M8T timing
+            (
+                &[
+                    "ROM BASE 3.01 (107888)",
+                    "FWVER=SPG 3.01",
+                    "PROTVER=18.00",
+                    "MOD=NEO-M8N-0",
+                ][..],
+                "EXT CORE 3.01 (107900)",
+                18,
+            ), // SPG 3.01, Flash
+            (
+                &["FWVER=SPG 3.50", "PROTVER=23.00"][..],
+                "EXT CORE 3.50 (190461)",
+                23,
+            ),
+            (
+                &["FWVER=SPG 3.51", "PROTVER=23.01"][..],
+                "ROM CORE 3.51 (19dc23)",
+                23,
+            ),
+            (
+                &["FWVER=HPG 1.40", "PROTVER=20.30"][..],
+                "EXT CORE 3.01 (db0c89)",
+                20,
+            ), // NEO-M8P RTK
+            (
+                &["FWVER=TIM 1.10", "PROTVER=22.00"][..],
+                "EXT CORE 3.01 (111141)",
+                22,
+            ), // NEO-M8T timing
         ] {
             let caps = probe_with(exts, sw);
             assert_eq!(caps.protocol_version, protver, "exts {:?}", exts);
@@ -261,8 +368,14 @@ mod neo8 {
     #[test]
     fn protver_found_among_other_extensions() {
         let caps = probe_with(
-            &["ROM BASE 3.01 (107888)", "FWVER=SPG 3.01", "PROTVER=18.00",
-              "GPS;GLO;GAL;BDS", "SBAS;IMES;QZSS", "GNSS OTP=GPS;GLO"],
+            &[
+                "ROM BASE 3.01 (107888)",
+                "FWVER=SPG 3.01",
+                "PROTVER=18.00",
+                "GPS;GLO;GAL;BDS",
+                "SBAS;IMES;QZSS",
+                "GNSS OTP=GPS;GLO",
+            ],
             "ROM CORE 3.01 (107888)",
         );
         assert_eq!(caps.protocol_version, 18);
@@ -273,17 +386,31 @@ mod neo8 {
     #[test]
     fn gn_main_talker_with_per_gnss_gsv() {
         let mut rx = Vec::new();
-        rx.extend(nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,"));
+        rx.extend(nmea_wire(
+            "GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,",
+        ));
         rx.extend(nmea_wire("GNGSA,A,3,80,71,73,79,69,,,,,,,,1.83,1.09,1.47"));
-        rx.extend(nmea_wire("GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00"));
-        rx.extend(nmea_wire("GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,"));
+        rx.extend(nmea_wire(
+            "GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00",
+        ));
+        rx.extend(nmea_wire(
+            "GLGSV,3,1,09,65,04,037,,66,55,061,20,67,52,131,29,68,05,176,",
+        ));
         rx.extend(nmea_wire("GAGSV,1,1,02,05,65,144,41,24,41,067,35"));
-        rx.extend(nmea_wire("GBGSV,1,1,03,08,52,281,40,13,46,314,38,14,15,145,"));
+        rx.extend(nmea_wire(
+            "GBGSV,1,1,03,08,52,281,40,13,46,314,38,14,15,145,",
+        ));
         let evs = feed(&rx);
         assert!(matches!(evs[0], Event::Nmea(nmea::Sentence::Gga(_))));
         assert!(matches!(evs[1], Event::Nmea(nmea::Sentence::Gsa(_))));
         for (i, talker) in [(2usize, *b"GP"), (3, *b"GL"), (4, *b"GA"), (5, *b"GB")] {
-            assert_eq!(evs[i], Event::NmeaOther { talker, mtype: *b"GSV" });
+            assert_eq!(
+                evs[i],
+                Event::NmeaOther {
+                    talker,
+                    mtype: *b"GSV"
+                }
+            );
         }
     }
 
@@ -294,7 +421,13 @@ mod neo8 {
         let evs = feed(&nmea_wire(
             "GNGNS,103600.01,5114.51176,N,00012.29380,W,ANNN,07,1.18,111.5,45.6,,,V",
         ));
-        assert_eq!(evs[0], Event::NmeaOther { talker: *b"GN", mtype: *b"GNS" });
+        assert_eq!(
+            evs[0],
+            Event::NmeaOther {
+                talker: *b"GN",
+                mtype: *b"GNS"
+            }
+        );
     }
 
     /// u-blox proprietary NMEA uses the address "PUBX" (UBX-13003221 §31.3);
@@ -304,7 +437,9 @@ mod neo8 {
         let evs = feed(&nmea_wire(
             "PUBX,00,081350.00,4717.113210,N,00833.915187,E,546.589,G3,2.1,2.0,0.007,77.52,0.007,,0.92,1.19,0.77,9,0,0",
         ));
-        let Event::NmeaOther { talker, mtype } = evs[0] else { panic!() };
+        let Event::NmeaOther { talker, mtype } = evs[0] else {
+            panic!()
+        };
         assert_eq!(&talker, b"PU", "proprietary header reported as-is");
         assert_eq!(&mtype, b"BX?");
     }
@@ -325,18 +460,30 @@ mod neo8 {
         // filters; the flag must read false.
         let mut p2 = [0u8; 92];
         p2[20] = 3;
-        let Event::NavPvt(pvt2) = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_PVT, &p2))[0]
-        else { panic!() };
+        let Event::NavPvt(pvt2) = feed(&ubx_wire(ubx::CLASS_NAV, ubx::NAV_PVT, &p2))[0] else {
+            panic!()
+        };
         assert!(!pvt2.gnss_fix_ok());
     }
 
     /// End-to-end on a probed M8: NAV-PVT can be enabled and NMEA muted.
     #[test]
     fn configure_binary_only_output() {
-        let mut rx = ubx_wire(ubx::CLASS_MON, ubx::MON_VER,
-            &mon_ver_payload("ROM CORE 3.01 (107888)", "00080000", &["PROTVER=18.00"]));
-        rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_MSG])); // ack enable PVT
-        rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_MSG])); // ack disable GGA
+        let mut rx = ubx_wire(
+            ubx::CLASS_MON,
+            ubx::MON_VER,
+            &mon_ver_payload("ROM CORE 3.01 (107888)", "00080000", &["PROTVER=18.00"]),
+        );
+        rx.extend(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_MSG],
+        )); // ack enable PVT
+        rx.extend(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_MSG],
+        )); // ack disable GGA
         let mut gps = NeoGps::new(MockUart::new(rx));
         block_on(gps.probe()).unwrap();
         block_on(gps.enable_nav_pvt()).unwrap();
@@ -353,25 +500,38 @@ mod m9_m10 {
     /// M10 SPG 5.10 reports PROTVER=34.10 (u-blox M10 interface description).
     #[test]
     fn m10_protver_34() {
-        let caps = probe_with(&["FWVER=SPG 5.10", "PROTVER=34.10", "MOD=MAX-M10S"], "ROM SPG 5.10");
+        let caps = probe_with(
+            &["FWVER=SPG 5.10", "PROTVER=34.10", "MOD=MAX-M10S"],
+            "ROM SPG 5.10",
+        );
         assert_eq!(caps.generation, Generation::Series9Plus);
         assert_eq!(caps.protocol_version, 34);
         assert_eq!(caps.max_rate_ms(), 40);
     }
 
-
     /// NAV-SOL was removed from protocol 24 on: enable_nav_sol must refuse
     /// locally, and enable_binary_nav must route to NAV-PVT.
     #[test]
     fn nav_sol_refused_binary_nav_uses_pvt() {
-        let mut rx = ubx_wire(ubx::CLASS_MON, ubx::MON_VER,
-            &mon_ver_payload("ROM SPG 5.10", "00190000", &["PROTVER=34.10"]));
-        rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[ubx::CLASS_CFG, ubx::CFG_MSG]));
+        let mut rx = ubx_wire(
+            ubx::CLASS_MON,
+            ubx::MON_VER,
+            &mon_ver_payload("ROM SPG 5.10", "00190000", &["PROTVER=34.10"]),
+        );
+        rx.extend(ubx_wire(
+            ubx::CLASS_ACK,
+            0x01,
+            &[ubx::CLASS_CFG, ubx::CFG_MSG],
+        ));
         let mut gps = NeoGps::new(MockUart::new(rx));
         let caps = block_on(gps.probe()).unwrap();
         assert!(!caps.has_nav_sol());
         block_on(gps.enable_binary_nav()).unwrap();
-        assert!(gps.uart_ref().tx.windows(3).any(|w| w == [ubx::CLASS_NAV, ubx::NAV_PVT, 1]));
+        assert!(gps
+            .uart_ref()
+            .tx
+            .windows(3)
+            .any(|w| w == [ubx::CLASS_NAV, ubx::NAV_PVT, 1]));
         assert_eq!(block_on(gps.enable_nav_sol()), Err(Error::Unsupported));
     }
 
@@ -392,14 +552,20 @@ mod wire {
     /// checksum 0x96 0xD9): external validation of the Fletcher checksum
     /// against u-blox hardware, not just against this crate's own encoder.
     const CFG_NMEA_CAPTURE: [u8; 28] = [
-        0xb5, 0x62, 0x06, 0x17, 0x14, 0x00, 0x20, 0x40, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0xd9,
+        0xb5, 0x62, 0x06, 0x17, 0x14, 0x00, 0x20, 0x40, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0xd9,
     ];
 
     #[test]
     fn published_cfg_nmea_capture_accepted() {
         let evs = feed(&CFG_NMEA_CAPTURE);
-        assert_eq!(evs, vec![Event::UbxOther { class: 0x06, id: 0x17 }]);
+        assert_eq!(
+            evs,
+            vec![Event::UbxOther {
+                class: 0x06,
+                id: 0x17
+            }]
+        );
     }
 
     #[test]
@@ -411,13 +577,20 @@ mod wire {
     /// One byte per read(): every state transition lands on a chunk boundary.
     #[test]
     fn byte_at_a_time_delivery() {
-        let mut rx = nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,");
+        let mut rx =
+            nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,");
         rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[0x06, 0x08]));
         let mut uart = MockUart::new(rx);
         uart.chunk = 1;
         let mut gps = NeoGps::new(uart);
-        assert!(matches!(block_on(gps.next_event()).unwrap(), Event::Nmea(_)));
-        assert!(matches!(block_on(gps.next_event()).unwrap(), Event::Ack { ok: true, .. }));
+        assert!(matches!(
+            block_on(gps.next_event()).unwrap(),
+            Event::Nmea(_)
+        ));
+        assert!(matches!(
+            block_on(gps.next_event()).unwrap(),
+            Event::Ack { ok: true, .. }
+        ));
     }
 
     /// Oversized UBX payloads (e.g. RXM-RAWX can exceed our 384-byte buffer)
@@ -429,8 +602,21 @@ mod wire {
         rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[0x06, 0x01]));
         let evs = feed(&rx);
         assert_eq!(evs.len(), 2);
-        assert_eq!(evs[0], Event::UbxOther { class: 0x02, id: 0x15 });
-        assert_eq!(evs[1], Event::Ack { class: 0x06, id: 0x01, ok: true });
+        assert_eq!(
+            evs[0],
+            Event::UbxOther {
+                class: 0x02,
+                id: 0x15
+            }
+        );
+        assert_eq!(
+            evs[1],
+            Event::Ack {
+                class: 0x06,
+                id: 0x01,
+                ok: true
+            }
+        );
     }
 
     /// 0xB5 not followed by 0x62 is noise, not a frame start.
@@ -439,14 +625,24 @@ mod wire {
         let mut rx = vec![0xB5, 0x00, 0xB5, 0xB5, 0x42];
         rx.extend(ubx_wire(ubx::CLASS_ACK, 0x01, &[0x06, 0x08]));
         let evs = feed(&rx);
-        assert_eq!(evs, vec![Event::Ack { class: 0x06, id: 0x08, ok: true }]);
+        assert_eq!(
+            evs,
+            vec![Event::Ack {
+                class: 0x06,
+                id: 0x08,
+                ok: true
+            }]
+        );
     }
 
     /// u-blox receivers always transmit the NMEA checksum; a sentence
     /// without "*hh" is malformed and must be dropped.
     #[test]
     fn nmea_without_checksum_rejected() {
-        assert!(feed(b"$GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,\r\n").is_empty());
+        assert!(feed(
+            b"$GPGGA,092725.00,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,\r\n"
+        )
+        .is_empty());
     }
 
     /// NMEA and UBX interleave freely on the wire (multi-protocol port);
@@ -456,13 +652,18 @@ mod wire {
         let mut rx = Vec::new();
         rx.extend(nmea_wire("GNGSA,A,3,80,71,,,,,,,,,,,1.83,1.09,1.47"));
         rx.extend(ubx_wire(ubx::CLASS_NAV, ubx::NAV_PVT, &[0u8; 92]));
-        rx.extend(nmea_wire("GNRMC,204520.00,A,5109.0262,N,11401.8407,W,0.004,133.4,130522,0.0,E,D,V"));
+        rx.extend(nmea_wire(
+            "GNRMC,204520.00,A,5109.0262,N,11401.8407,W,0.004,133.4,130522,0.0,E,D,V",
+        ));
         let evs = feed(&rx);
-        assert!(matches!(evs[..], [
-            Event::Nmea(nmea::Sentence::Gsa(_)),
-            Event::NavPvt(_),
-            Event::Nmea(nmea::Sentence::Rmc(_)),
-        ]));
+        assert!(matches!(
+            evs[..],
+            [
+                Event::Nmea(nmea::Sentence::Gsa(_)),
+                Event::NavPvt(_),
+                Event::Nmea(nmea::Sentence::Rmc(_)),
+            ]
+        ));
     }
 }
 
@@ -476,7 +677,9 @@ mod units {
     fn gga_lat_lon(lat: &str, ns: &str, lon: &str, ew: &str) -> (Option<i32>, Option<i32>) {
         let body = format!("GPGGA,120000.00,{lat},{ns},{lon},{ew},1,08,1.0,10.0,M,0.0,M,,");
         let evs = feed(&nmea_wire(&body));
-        let Event::Nmea(nmea::Sentence::Gga(g)) = evs[0] else { panic!() };
+        let Event::Nmea(nmea::Sentence::Gga(g)) = evs[0] else {
+            panic!()
+        };
         (g.lat_1e7, g.lon_1e7)
     }
 
@@ -507,9 +710,17 @@ mod units {
     /// RMC speed is in knots; 1 knot = 0.514444 m/s exactly (1852 m / 3600 s).
     #[test]
     fn knots_to_mm_per_s() {
-        for (knots, mm_s) in [("1.000", 514u32), ("0.004", 2), ("10.000", 5144), ("100.000", 51444)] {
-            let body = format!("GPRMC,083559.00,A,4717.11437,N,00833.91522,E,{knots},77.52,091202,,,A");
-            let Event::Nmea(nmea::Sentence::Rmc(r)) = feed(&nmea_wire(&body))[0] else { panic!() };
+        for (knots, mm_s) in [
+            ("1.000", 514u32),
+            ("0.004", 2),
+            ("10.000", 5144),
+            ("100.000", 51444),
+        ] {
+            let body =
+                format!("GPRMC,083559.00,A,4717.11437,N,00833.91522,E,{knots},77.52,091202,,,A");
+            let Event::Nmea(nmea::Sentence::Rmc(r)) = feed(&nmea_wire(&body))[0] else {
+                panic!()
+            };
             assert_eq!(r.speed_mm_s, Some(mm_s), "{knots} knots");
         }
     }
@@ -519,7 +730,9 @@ mod units {
     fn dop_scaling_and_ceiling() {
         let Event::Nmea(nmea::Sentence::Gsa(g)) =
             feed(&nmea_wire("GPGSA,A,1,,,,,,,,,,,,,99.99,99.99,99.99"))[0]
-        else { panic!() };
+        else {
+            panic!()
+        };
         assert_eq!(g.fix_type, 1);
         assert_eq!(g.pdop_1e2, Some(9999));
     }
@@ -528,9 +741,11 @@ mod units {
     /// they scale to milliseconds.
     #[test]
     fn time_fraction_to_millis() {
-        let Event::Nmea(nmea::Sentence::Gga(g)) =
-            feed(&nmea_wire("GPGGA,092725.25,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,"))[0]
-        else { panic!() };
+        let Event::Nmea(nmea::Sentence::Gga(g)) = feed(&nmea_wire(
+            "GPGGA,092725.25,4717.11399,N,00833.91590,E,1,08,1.01,499.6,M,48.0,M,,",
+        ))[0] else {
+            panic!()
+        };
         assert_eq!(g.time.unwrap().millis, 250);
     }
 
@@ -538,9 +753,11 @@ mod units {
     /// millimetre altitude scaling.
     #[test]
     fn altitude_millimetres_signed() {
-        let Event::Nmea(nmea::Sentence::Gga(g)) =
-            feed(&nmea_wire("GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,"))[0]
-        else { panic!() };
+        let Event::Nmea(nmea::Sentence::Gga(g)) = feed(&nmea_wire(
+            "GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M,,",
+        ))[0] else {
+            panic!()
+        };
         assert_eq!(g.alt_msl_mm, Some(1_113_000));
         assert_eq!(g.geoid_sep_mm, Some(-21_300));
     }

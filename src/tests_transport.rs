@@ -37,7 +37,14 @@ fn glitch_mid_frame_resyncs_without_corruption() {
     uart.fail_on_reads = vec![1]; // read #1: the glitch, mid-frame
     let mut gps = NeoGps::new(uart);
     let ev = block_on(gps.next_event()).unwrap();
-    assert_eq!(ev, Event::Ack { class: 0x06, id: 0x08, ok: true });
+    assert_eq!(
+        ev,
+        Event::Ack {
+            class: 0x06,
+            id: 0x08,
+            ok: true
+        }
+    );
     // Exactly one frame came out: the partial one was discarded, not merged.
     assert_eq!(block_on(gps.next_event()), Err(Error::Eof));
 }
@@ -69,7 +76,14 @@ fn intermittent_glitches_never_trip_threshold() {
     for _ in 0..4 {
         gps.uart_mut().fail_next_reads = DEFAULT_READ_ERROR_TOLERANCE as usize;
         let ev = block_on(gps.next_event()).unwrap();
-        assert_eq!(ev, Event::Ack { class: 0x06, id: 0x01, ok: true });
+        assert_eq!(
+            ev,
+            Event::Ack {
+                class: 0x06,
+                id: 0x01,
+                ok: true
+            }
+        );
     }
 }
 
@@ -92,7 +106,11 @@ fn reset_prevents_bogus_length_trap() {
     // spliced header would read a bogus length and swallow it.
     assert_eq!(
         block_on(gps.next_event()),
-        Ok(Event::Ack { class: 0x06, id: 0x08, ok: true })
+        Ok(Event::Ack {
+            class: 0x06,
+            id: 0x08,
+            ok: true
+        })
     );
 }
 

@@ -51,7 +51,7 @@ pub enum Error<E> {
     /// The module answered a configuration frame with `ACK-NAK`.
     Nak { class: u8, id: u8 },
     /// No `ACK`/reply arrived within the frame budget.
-    Timeout,
+    NoReply,
     /// The requested feature is not supported by the detected module
     /// (e.g. `CFG-GNSS` on a NEO-6M, or a nav rate above the module maximum).
     Unsupported,
@@ -425,7 +425,7 @@ impl<S: Read + Write> NeoGps<S> {
                 _ => {}
             }
         }
-        Err(Error::Timeout)
+        Err(Error::NoReply)
     }
 
     /// Poll `UBX-MON-VER`, detect the module generation, and store the result.
@@ -465,7 +465,7 @@ impl<S: Read + Write> NeoGps<S> {
                 _ => {}
             }
         }
-        Err(Error::Timeout)
+        Err(Error::NoReply)
     }
 
     /// Set the navigation solution rate. `ms` is the interval between fixes
