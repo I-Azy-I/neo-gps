@@ -1,48 +1,34 @@
-use ubx::{CLASS_ACK, CLASS_NAV};
+use ubx::CLASS_ACK;
+#[cfg(feature = "builtin-codec")]
+use ubx::CLASS_NAV;
 
 use crate::{nmea, ubx, Event};
-// NMEA 0183 caps sentences at 82 chars, but u-blox proprietary PUBX,00 runs
-// ~110 and high-precision mode lengthens standard sentences; 128 covers all.
+// 128 covers the longest sentence u-blox sends (PUBX,00 at ~110 chars).
 pub(crate) const NMEA_MAX: usize = 128;
 const UBX_MAX_PAYLOAD: usize = 384; // NAV-PVT = 92, MON-VER ≈ 40 + 30·n
 
 #[derive(Clone, Copy)]
 enum DState {
     Idle,
-    /// Collecting an NMEA sentence body (after `$`, before CR/LF).
     Nmea,
-    /// Saw 0xB5, expecting 0x62.
     UbxSync,
-    /// Collecting UBX header (class, id, len_lo, len_hi).
     UbxHeader,
-    /// Collecting `remaining` payload bytes (payload may be truncated in
-    /// the buffer if oversized, but framing stays byte-accurate).
-    UbxPayload {
-        remaining: usize,
-    },
-    /// Collecting the two checksum bytes.
-    UbxCksum {
-        got: u8,
-    },
+    UbxPayload { remaining: usize },
+    UbxCksum { got: u8 },
 }
 
 pub(crate) struct Deframer {
     state: DState,
     nmea_buf: [u8; NMEA_MAX],
     nmea_len: usize,
-    /// Snapshot of the last sentence that produced an event (accessor-stable:
-    /// later garbage or partial frames can't clobber it).
     nmea_last: [u8; NMEA_MAX],
     nmea_last_len: usize,
     ubx_hdr: [u8; 4],
     ubx_hdr_len: usize,
     ubx_buf: [u8; UBX_MAX_PAYLOAD],
     ubx_len: usize,
-    /// Snapshot of the last complete UBX frame (sync bytes through checksum)
-    /// that produced an event; payload accessors slice into it.
     ubx_last: [u8; 8 + UBX_MAX_PAYLOAD],
     ubx_last_len: usize,
-    /// Running Fletcher checksum over class..payload.
     ck: (u8, u8),
     rx_ck: [u8; 2],
 }
@@ -66,14 +52,20 @@ impl Deframer {
         }
     }
 
-    /// Drop any partially assembled frame and return to hunting for sync.
-    /// Snapshots of already-delivered events are untouched.
+    /// Drop the frame in progress and hunt for sync again. Snapshots stay.
     pub(crate) fn reset(&mut self) {
         self.state = DState::Idle;
     }
 
     /// Payload of the last UBX frame that produced an event.
     pub(crate) fn last_ubx_payload(&self) -> &[u8] {
+        // A snapshot is sync(2) + header(4) + payload + checksum(2), so fewer
+        // than 8 bytes means no frame has completed and there is nothing to
+        // slice. Reachable from safe public API: a caller may look before the
+        // first UBX frame arrives.
+        if self.ubx_last_len < 8 {
+            return &[];
+        }
         &self.ubx_last[6..self.ubx_last_len - 2]
     }
 
@@ -82,8 +74,8 @@ impl Deframer {
         &self.ubx_last[..self.ubx_last_len]
     }
 
-    /// Bytes of the last NMEA sentence that produced an event
-    /// ($ and CR/LF excluded, checksum trailer included).
+    /// Bytes of the last NMEA sentence that produced an event: no `$` or
+    /// CR/LF, checksum trailer included.
     pub(crate) fn last_nmea_line(&self) -> &[u8] {
         &self.nmea_last[..self.nmea_last_len]
     }
@@ -120,7 +112,7 @@ impl Deframer {
                         return ev;
                     }
                     b'$' => {
-                        // Lost sync mid-sentence; restart.
+                        // Lost sync mid-sentence.
                         self.nmea_len = 0;
                     }
                     _ => {
@@ -128,7 +120,7 @@ impl Deframer {
                             self.nmea_buf[self.nmea_len] = b;
                             self.nmea_len += 1;
                         } else {
-                            // Oversized garbage: drop the sentence.
+                            // Too long to be a sentence.
                             self.state = DState::Idle;
                         }
                     }
@@ -141,10 +133,15 @@ impl Deframer {
                     self.ubx_hdr_len = 0;
                     self.ck = (0, 0);
                     self.state = DState::UbxHeader;
-                } else {
-                    self.state = DState::Idle;
+                    return None;
                 }
-                None
+                // Not a UBX frame after all, and this byte may open one
+                // itself: a second 0xB5, or the `$` of a sentence. Hand it
+                // back to `Idle` instead of dropping it, or a single stray
+                // 0xB5 swallows the whole frame behind it. Re-entry stops
+                // here, since `Idle` never dispatches again.
+                self.state = DState::Idle;
+                self.push(b)
             }
 
             DState::UbxHeader => {
@@ -188,9 +185,8 @@ impl Deframer {
                 if self.rx_ck != [self.ck.0, self.ck.1] {
                     return None; // bad checksum: drop silently
                 }
-                // Checksum valid → this frame will produce an event; snapshot
-                // the complete frame so accessors (and external codecs, which
-                // want sync+checksum) survive later corrupt frames.
+                // Snapshot the whole frame so the accessors survive later
+                // corrupt frames. External codecs want sync+checksum.
                 self.ubx_last[0] = 0xB5;
                 self.ubx_last[1] = 0x62;
                 self.ubx_last[2..6].copy_from_slice(&self.ubx_hdr);
@@ -200,7 +196,7 @@ impl Deframer {
                 let (class, id) = (self.ubx_hdr[0], self.ubx_hdr[1]);
                 let payload = &self.ubx_last[6..self.ubx_last_len - 2];
                 match (class, id) {
-                    // ACK correlation is transport machinery, never gated.
+                    // ACK correlation is transport, so never feature-gated.
                     (CLASS_ACK, aid @ (0x00 | 0x01)) if payload.len() >= 2 => Some(Event::Ack {
                         class: payload[0],
                         id: payload[1],
@@ -222,6 +218,12 @@ impl Deframer {
                     (CLASS_NAV, ubx::NAV_SOL) => Some(
                         ubx::NavSol::parse(payload)
                             .map(Event::NavSol)
+                            .unwrap_or(Event::UbxOther { class, id }),
+                    ),
+                    #[cfg(feature = "builtin-codec")]
+                    (CLASS_NAV, ubx::NAV_VELNED) => Some(
+                        ubx::NavVelned::parse(payload)
+                            .map(Event::NavVelned)
                             .unwrap_or(Event::UbxOther { class, id }),
                     ),
                     _ => Some(Event::UbxOther { class, id }),

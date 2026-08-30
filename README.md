@@ -30,21 +30,28 @@ match gps.next_event().await? {     match gps.next_event()? {
 The modules share transport (UART @ 9600 8N1), grammar (NMEA 0183 + UBX) and
 differ only in *parameters*:
 
-| | NEO-6M | NEO-8M | M9/M10 |
-|---|---|---|---|
-| NMEA talker | `GP` | `GN`/`GL`/`GA`/`GB` | same |
-| NMEA version | 2.3 | 4.0 | 4.1x |
-| Max nav rate | 5 Hz | 10 Hz | 25 Hz |
-| `UBX-NAV-PVT` | ✗ | ✓ | ✓ |
-| `UBX-NAV-POSLLH`/`SOL` | ✓ | ✓ (deprecated) | ✗ (removed proto 24+) |
-| `UBX-CFG-GNSS` | ✗ | ✓ | ✓* |
+| | NEO-6M | NEO-7M | NEO-8M | M9 | M10 |
+|---|---|---|---|---|---|
+| NMEA talker | `GP` | `GP`/`GL` | `GN`/`GL`/`GA`/`GB` | same | same |
+| NMEA version | 2.3 | 2.3 | 4.0 | 4.1x | 4.1x |
+| Max nav rate, stock GNSS config | 5 Hz | 10 Hz | 5 Hz | 25 Hz | 10 Hz |
+| Max nav rate, single GNSS | 5 Hz | 10 Hz | 10 Hz | 25 Hz | 25 Hz |
+| `UBX-NAV-PVT` | ✗ | ✓ | ✓ | ✓ | ✓ |
+| `UBX-NAV-POSLLH`/`SOL` | ✓ | ✓ | ✓ (deprecated) | ✗ (removed proto 24+) | ✗ |
+| `UBX-CFG-GNSS` | ✗ | ✓ | ✓ | ✓ | ✗ |
+| legacy `UBX-CFG-*` | ✓ | ✓ | ✓ | ✓ | ✗* |
 
 So the parser is talker/version-tolerant, and the three version-dependent
 features are gated on a `Capabilities` struct filled at runtime by polling
 `UBX-MON-VER` (`gps.probe()`). Without probing, conservative NEO-6 defaults
 apply and every command remains universally valid.
 
-\* M10 deprecates `CFG-GNSS` in favour of `CFG-VALSET`; use `send_ubx` for that.
+\* At protocol 34 the whole UBX-CFG class becomes `CFG-CFG`, `CFG-RST` and
+`CFG-VALSET`/`VALGET`/`VALDEL`. This driver does not speak the key/value
+interface yet, so on an M10 the wrappers built on `CFG-MSG`, `CFG-RATE`,
+`CFG-PRT`, `CFG-NAV5` and `CFG-GNSS` return `Error::Unsupported` rather than
+send a frame the module would NAK; `save_config`, `factory_reset` and `reset`
+still work. Check `Capabilities::has_legacy_cfg()`, or reach for `send_ubx`.
 
 ## Usage (embassy)
 
@@ -56,7 +63,8 @@ let mut gps = NeoGps::new(uart);
 
 // Optional: detect module generation, then configure.
 let caps = gps.probe().await?;
-gps.set_nav_rate_ms(caps.max_rate_ms()).await?;   // fastest supported
+gps.set_nav_rate_ms(caps.max_rate_ms()).await?;   // fastest for the stock
+                                                  // constellation setup
 gps.disable_nmea(0x03).await?;                    // mute GSV chatter
 gps.enable_binary_nav().await?;                   // NAV-PVT on 7/8/M9+,
                                                   // NAV-POSLLH + NAV-SOL on a NEO-6M
@@ -137,7 +145,7 @@ a guaranteed `Timeout`.
 
 ## Tests
 
-`cargo test` runs 53 host-side tests plus 12 doctests. Beyond the core suite
+`cargo test` runs 70 host-side tests plus 16 doctests. Beyond the core suite
 (deframing, resync, corrupt-frame handling, async probe/configure flows on a
 scripted mock UART), a datasheet-derived module encodes facts read directly
 from the official u-blox protocol specifications:
@@ -146,7 +154,7 @@ from the official u-blox protocol specifications:
   cycle with the GP talker, boot TXT sentences, absence of NAV-PVT and
   CFG-GNSS, absence of `PROTVER` in MON-VER classifying as Series6, 5 Hz cap.
 * **u-blox 7** (GPS.G7-SW-12001, protocol 14): the 84-byte NAV-PVT variant
-  (a real bug found by reading the spec — the 8-series message is 92 bytes),
+  (a real bug found by reading the spec: the 8-series message is 92 bytes),
   GL-talker output in GLONASS-only mode, capability boundary (PVT yes,
   CFG-GNSS no).
 * **u-blox 8/M8** (UBX-13003221 R17): the firmware→protocol table (SPG 2.01
@@ -154,9 +162,32 @@ from the official u-blox protocol specifications:
   spellings (space form ≤17, `=` form ≥18) amid realistic extension strings,
   GN main talker with per-constellation GSV talkers (GP/GL/GA/GB), NMEA 4.1
   GNS, ~110-char proprietary PUBX,00 sentences, gnssFixOK semantics.
-* **M9/M10**: PROTVER 32/34 forward-classification.
+* **M9 / M10**: PROTVER 32 and 34, including the M10 losing the legacy
+  `UBX-CFG-*` class.
 * **Wire level**: a published, externally captured CFG-NMEA frame with its
   real checksum validates the Fletcher implementation against actual u-blox
   hardware; byte-at-a-time delivery; oversized-payload truncation with intact
   framing; false sync bytes; missing-checksum rejection; the spec's own
   ddmm.mmmmm worked example and unit-scaling vectors (knots→mm/s, DOP×100).
+
+### Hardware-in-the-loop
+
+Everything above runs on the host against scripted bytes. [`hwtest/`](hwtest)
+holds the other half: 22 tests that run **on an MCU** (an ESP32-S3, via
+[`embedded-test`](https://crates.io/crates/embedded-test) and `probe-rs`) with a
+real NEO module wired to its UART, covering every public entry point of the
+driver against real silicon — probe classification, `CFG-MSG` that is not just
+ACKed but obeyed, `CFG-RATE` that measurably changes the solution cadence,
+NAK correlation, binary nav per generation, and the fix path. The whole suite
+runs twice, once per driver build (`async` and `sync`), from one copy of each
+test body.
+
+```sh
+cd hwtest && . ~/export-esp.sh
+NEO_GEN=8 cargo test --test hardware                                      # async
+NEO_GEN=8 cargo test --test hardware --no-default-features --features sync
+```
+
+It is a standalone workspace, so it never affects a root `cargo test` or the
+published crate. See [`hwtest/README.md`](hwtest/README.md) for wiring, setup
+and the coverage table.

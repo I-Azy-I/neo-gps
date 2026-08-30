@@ -1,0 +1,4 @@
+# The Xtensa LX7 core of the ESP32-S3 needs Espressif's Rust fork.
+#   espup install         # provides the "esp" toolchain used here
+[toolchain]
+channel = "esp"

@@ -1,6 +1,6 @@
 //! Codec-adapter tests. Where `builtin-codec` is also enabled, these
 //! cross-validate: the external crate and the built-in decoder must agree
-//! on the same framed bytes — two independent implementations checking
+//! on the same framed bytes: two independent implementations checking
 //! each other.
 
 use crate::testutil::*;
@@ -14,6 +14,7 @@ mod nmea_ext {
 
     fn last_line_of(body: &str) -> Vec<u8> {
         let mut gps = NeoGps::new(MockUart::new(nmea_wire(body)));
+        gps.set_skip_unknown_sentences(false); // undecoded sentences must surface
         block_on(gps.next_event()).unwrap();
         gps.last_nmea_line().to_vec()
     }
@@ -35,7 +36,7 @@ mod nmea_ext {
         assert_eq!(gga.fix_satellites, Some(8));
     }
 
-    /// GSV — a sentence the built-in deliberately does not decode — is the
+    /// GSV, a sentence the built-in deliberately does not decode, is the
     /// canonical use of the adapter: NmeaOther + external decode.
     #[test]
     fn external_crate_decodes_gsv_we_dont() {
@@ -75,6 +76,9 @@ mod ublox_ext {
             ubx_int::NAV_PVT,
             &p,
         )));
+        // Without `builtin-codec` NAV-PVT arrives as UbxOther, which the
+        // default filter hides.
+        gps.set_skip_unknown_sentences(false);
         block_on(gps.next_event()).unwrap();
         let frame = gps.last_ubx_frame().to_vec();
 
@@ -108,6 +112,7 @@ mod ublox_ext {
             ubx_int::MON_VER,
             &payload,
         )));
+        gps.set_skip_unknown_sentences(false); // MON-VER surfaces as UbxOther
         block_on(gps.next_event()).unwrap();
         let frame = gps.last_ubx_frame().to_vec();
 
