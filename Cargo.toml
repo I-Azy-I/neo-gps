@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/I-Azy-I/neo-gps"
 documentation = "https://docs.rs/neo-gps"
 readme = "README.md"
-categories = ["embedded", "no-std", "asynchronous"]
+categories = ["embedded", "hardware-support", "no-std", "asynchronous"]
 keywords = ["gps", "gnss", "ublox", "neo-6m", "embedded-hal-async"]
 
 [package.metadata.docs.rs]
