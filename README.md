@@ -13,7 +13,7 @@ and blocking code.
 
 ```toml
 [dependencies]
-neo-gps = "0.7"
+neo-gps = "0.1"
 ```
 
 ```rust
@@ -64,7 +64,7 @@ has no `.await`.
 
 ```toml
 neo-gps = "0.1"                                                                # async: embedded-io-async
-neo-gps = { version = "0.7", default-features = false, features = ["sync", "builtin-codec"] }  # blocking: embedded-io
+neo-gps = { version = "0.1", default-features = false, features = ["sync", "builtin-codec"] }  # blocking: embedded-io
 ```
 
 The UART only has to implement `embedded-io[-async]` `Read + Write`, such as an
