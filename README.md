@@ -3,6 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/neo-gps.svg)](https://crates.io/crates/neo-gps)
 [![docs.rs](https://docs.rs/neo-gps/badge.svg)](https://docs.rs/neo-gps)
 [![CI](https://github.com/I-Azy-I/neo-gps/actions/workflows/ci.yml/badge.svg)](https://github.com/I-Azy-I/neo-gps/actions/workflows/ci.yml)
+[![no_std](https://img.shields.io/badge/no__std-yes-green.svg)](https://docs.rust-embedded.org/book/intro/no-std.html)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A `no_std`, zero-allocation Rust driver for the u-blox **NEO-xM** GPS family
