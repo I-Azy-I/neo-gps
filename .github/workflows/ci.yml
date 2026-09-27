@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # `sync` and `async` are mutually exclusive, so `--all-features` does not
+  # build and cargo-hack's own matrix would trip over it. The valid
+  # combinations are enumerated instead.
+  test:
+    name: test (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - async
+          - sync
+          - async,builtin-codec
+          - sync,builtin-codec
+          - async,nmea,ublox
+          - sync,nmea,ublox
+          - async,builtin-codec,nmea,ublox
+          - sync,builtin-codec,nmea,ublox
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy --all-targets --no-default-features --features ${{ matrix.features }} -- -D warnings
+      - name: test
+        run: cargo test --no-default-features --features ${{ matrix.features }}
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  # `rust-version` in Cargo.toml is a promise; this is what keeps it one.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: Swatinem/rust-cache@v2
+      # Build only: the dev-dependencies and test harness are free to need a
+      # newer compiler than the library itself promises.
+      - run: cargo build --no-default-features --features async,builtin-codec,nmea,ublox
+      - run: cargo build --no-default-features --features sync,builtin-codec
+
+  # Catches the docs.rs build breaking, which is invisible until publish.
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: --cfg docsrs -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --no-default-features --features async,builtin-codec,nmea,ublox
+
+  # The hardware suite is a standalone workspace for an ESP32-S3 and cannot
+  # run here, but it must not be left to rot: check that it still compiles
+  # against the driver.
+  hwtest-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install the Xtensa toolchain
+        run: |
+          cargo install espup --locked
+          espup install --targets esp32s3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: hwtest
+      - name: check both driver builds
+        run: |
+          . ~/export-esp.sh
+          cd hwtest
+          cargo clippy --test hardware --features codec-nmea,codec-ublox -- -D warnings
+          cargo clippy --test hardware --no-default-features \
+            --features sync,codec-nmea,codec-ublox -- -D warnings
