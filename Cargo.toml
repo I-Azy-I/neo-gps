@@ -9,7 +9,7 @@ repository = "https://github.com/I-Azy-I/neo-gps"
 documentation = "https://docs.rs/neo-gps"
 readme = "README.md"
 categories = ["embedded", "hardware-support", "no-std", "asynchronous"]
-keywords = ["gps", "gnss", "ublox", "neo-6m", "embedded-hal-async"]
+keywords = ["gps", "gnss", "ublox", "neo-gps", "embedded-hal-async"]
 
 [package.metadata.docs.rs]
 features = ["async", "builtin-codec", "nmea", "ublox"]
