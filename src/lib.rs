@@ -1,23 +1,25 @@
 //! # neo-gps
 //!
-//! An async, `no_std`, zero-allocation driver for the u-blox NEO-xM GPS module
-//! family (NEO-6M, NEO-7M, NEO-8M, NEO-M9N, ...) over UART.
+//! A `no_std`, zero-allocation driver for the u-blox NEO-xM GPS family
+//! (NEO-6M, NEO-7M, NEO-8M, NEO-M9N, NEO-M10) over UART. It works in both
+//! async (`async` feature, the default) and blocking (`sync` feature) code.
 //!
-//! ## Example (embassy-style pseudocode)
+//! ## Example
 //!
 //! ```ignore
+//! use neo_gps::NeoGps;
+//!
+//! let uart = BufferedUart::new(/* ... */); // 9600 8N1, any embedded-io-async Read + Write
 //! let mut gps = NeoGps::new(uart);
-//! let caps = gps.probe().await?;           // optional; defaults are safe
-//! gps.set_nav_rate_ms(caps.max_rate_ms()).await?;
+//!
 //! loop {
-//!     match gps.next_event().await? {
-//!         Event::Nmea(Sentence::Rmc(rmc)) if rmc.valid => {
-//!             let lat = rmc.lat_1e7; // degrees * 1e7
-//!         }
-//!         _ => {}
-//!     }
+//!     let pos = gps.next_coordinate().await?; // only returns once there is a real fix
+//!     defmt::info!("lat={} lon={}", pos.lat_1e7, pos.lon_1e7); // degrees × 1e7
 //! }
 //! ```
+//!
+//! See [`NeoGps`] for configuration, and the
+//! [README](https://github.com/I-Azy-I/neo-gps) for the full feature list.
 
 #![cfg_attr(not(test), no_std)]
 #![deny(unsafe_code)]
