@@ -1,5 +1,10 @@
 # neo-gps
 
+[![crates.io](https://img.shields.io/crates/v/neo-gps.svg)](https://crates.io/crates/neo-gps)
+[![docs.rs](https://docs.rs/neo-gps/badge.svg)](https://docs.rs/neo-gps)
+[![CI](https://github.com/I-Azy-I/neo-gps/actions/workflows/ci.yml/badge.svg)](https://github.com/I-Azy-I/neo-gps/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 A `no_std`, zero-allocation Rust driver for the u-blox **NEO-xM** GPS family
 (NEO-6M, NEO-7M, NEO-8M, NEO-M9N, NEO-M10) over UART. It works in both async
 and blocking code.
