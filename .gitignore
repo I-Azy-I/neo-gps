@@ -1,2 +1,6 @@
 /target
 Cargo.lock
+/hwtest/target
+# The hardware suite is an application, not a library: pin its dependency
+# versions so a test run is reproducible across machines and months.
+!/hwtest/Cargo.lock
