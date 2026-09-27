@@ -1,0 +1,86 @@
+# Standalone workspace: this crate only ever builds for the ESP32-S3, so it
+# must not be dragged into a host-targeted `cargo test` at the repo root.
+[workspace]
+
+[package]
+name = "neo-gps-hwtest"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "On-target hardware-in-the-loop tests for the neo-gps driver (ESP32-S3 + embedded-test)"
+
+[dependencies]
+# The driver under test. `async`/`sync` are selected by this crate's own
+# features (below) so the same suite can exercise both builds.
+neo-gps = { path = "..", default-features = false }
+
+# The external vocabulary crates, so the codec tests can name their types.
+# Versions must match the driver's exactly, or cargo links two copies and the
+# adapter's `ParseResult`/`Parser` would be different types from ours.
+nmea = { version = "0.7", default-features = false, features = [
+    "GNSS",
+], optional = true }
+ublox = { version = "0.4", default-features = false, optional = true }
+
+esp-hal = { version = "1.1", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.3", features = ["embassy", "esp32s3", "log-04"] }
+# Supplies the ESP-IDF app descriptor that probe-rs requires to flash an image.
+# Must be >= 0.5: 0.4 emits it into `.rodata_desc.appdesc`, a section esp-hal
+# 1.1's linker script no longer maps, so the descriptor is silently dropped and
+# flashing fails with "App Descriptor missing". 0.6 needs esp-hal 1.2.
+esp-bootloader-esp-idf = { version = "0.5", features = ["esp32s3", "log-04"] }
+embassy-executor = { version = "0.10", features = ["log"] }
+embassy-time = { version = "0.5", features = ["log"] }
+# Provides the `embedded-test.x` linker script the build script links in.
+embedded-test-linker-script = "0.1"
+
+log = "0.4"
+rtt-target = { version = "0.6", features = ["log"] }
+
+[dev-dependencies]
+embedded-test = { version = "0.7", features = [
+    # Xtensa cores use the OpenOCD semihosting ABI, not the ARM/RISC-V one.
+    "xtensa-semihosting",
+    # Async `#[test]`/`#[init]` support, driven by esp-rtos's own executor.
+    "embassy-010",
+    "external-executor",
+    "log",
+] }
+
+[features]
+default = ["async", "builtin-codec"]
+## The driver's built-in GGA/RMC/GSA and NAV-PVT/POSLLH/SOL decoders.
+## Turn it off to exercise the configuration where `codec::nmea` and
+## `codec::ublox` are the only decoders and every frame arrives as
+## `NmeaOther`/`UbxOther`:
+##   cargo test --test hardware --no-default-features \
+##     --features async,codec-nmea,codec-ublox
+builtin-codec = ["neo-gps/builtin-codec"]
+## Exercise the driver's async build (embedded-io-async). Default.
+async = ["neo-gps/async"]
+## Exercise the driver's blocking build (embedded-io). Mutually exclusive with
+## `async`, so select it with `--no-default-features --features sync`.
+sync = ["neo-gps/sync"]
+## Additionally decode live sentences through the external `nmea` crate, via
+## the driver's `codec::nmea` adapter. Adds tests; does not remove any.
+codec-nmea = ["neo-gps/nmea", "dep:nmea"]
+## Additionally decode live UBX frames through the external `ublox` crate, via
+## the driver's `codec::ublox` adapter.
+codec-ublox = ["neo-gps/ublox", "dep:ublox"]
+
+[lib]
+# The shared harness is a plain library; it has no tests of its own.
+test = false
+bench = false
+
+[[test]]
+name = "hardware"
+harness = false # embedded-test brings its own harness.
+
+# esp-hal warns loudly (and correctly) that an unoptimized build can be orders
+# of magnitude slower, which matters here: the tests measure real UART timing.
+[profile.dev]
+opt-level = "s"
+
+[profile.dev.package."*"]
+opt-level = "s"

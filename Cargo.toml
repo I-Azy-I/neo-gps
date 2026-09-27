@@ -1,12 +1,19 @@
 [package]
 name = "neo-gps"
-version = "0.6.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Sync/async no_std driver for the u-blox NEO-xM GPS module family (NEO-6M/7M/8M/M9/M10)"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/I-Azy-I/neo-gps"
+documentation = "https://docs.rs/neo-gps"
+readme = "README.md"
 categories = ["embedded", "no-std", "asynchronous"]
 keywords = ["gps", "gnss", "ublox", "neo-6m", "embedded-hal-async"]
+
+[package.metadata.docs.rs]
+features = ["async", "builtin-codec", "nmea", "ublox"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["async", "builtin-codec"]
@@ -18,13 +25,15 @@ async = ["dep:embedded-io-async"]
 ## Blocking driver over embedded-io (superloops, std targets, ...)
 sync = ["dep:embedded-io"]
 
+# `docsrs` is set by docs.rs only; tell rustc it is a known cfg name so a
+# local build does not warn about it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
+
 [dependencies]
 embedded-io-async = { version = "0.6", optional = true }
 embedded-io = { version = "0.6", optional = true }
 maybe-async-cfg = "0.2"
 # External NMEA vocabulary (feature "nmea"): adapter in `codec::nmea`.
 nmea = { version = "0.7", default-features = false, features = ["GNSS"], optional = true }
-# External UBX vocabulary (feature "ublox"): adapter in `codec::ublox`.
-# Pinned to 0.4 for MSRV 1.75; on rustc >= 1.83 prefer:
-#   ublox = { version = "0.9", default-features = false, features = ["ubx_proto23"] }
 ublox = { version = "0.4", default-features = false, optional = true }

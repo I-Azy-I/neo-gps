@@ -1,11 +1,11 @@
 //! Tests derived from the official u-blox protocol specifications:
 //!
-//! * u-blox 6 Receiver Description (GPS.G6-SW-10018-F, FW 7.03) — NMEA 2.3,
+//! * u-blox 6 Receiver Description (GPS.G6-SW-10018-F, FW 7.03): NMEA 2.3,
 //!   GP talker, no NAV-PVT in the NAV class.
-//! * u-blox 7 Receiver Description (GPS.G7-SW-12001, protocol 14) — NAV-PVT
+//! * u-blox 7 Receiver Description (GPS.G7-SW-12001, protocol 14): NAV-PVT
 //!   introduced with an 84-byte payload.
 //! * u-blox 8 / M8 Receiver Description (UBX-13003221 R17, protocols
-//!   15.00–23.01) — GN main talker, NMEA 4.0/4.1, 92-byte NAV-PVT,
+//!   15.00-23.01): GN main talker, NMEA 4.0/4.1, 92-byte NAV-PVT,
 //!   MON-VER `PROTVER 15.00` (proto <= 17) vs `PROTVER=18.00` (proto >= 18)
 //!   extension formats, firmware/protocol version table.
 
@@ -25,7 +25,7 @@ fn probe_with(exts: &[&str], sw: &str) -> Capabilities {
 }
 
 // ===========================================================================
-// NEO-6M — u-blox 6, FW 7.03, protocol 12/13. GPS-only, NMEA 2.3, GP talker.
+// NEO-6M: u-blox 6, FW 7.03, protocol 12/13. GPS-only, NMEA 2.3, GP talker.
 // ===========================================================================
 mod neo6 {
     use super::*;
@@ -90,7 +90,7 @@ mod neo6 {
     }
 
     /// NMEA 2.3 RMC ends with the mode indicator (no navStatus field).
-    /// Spec: "$GPRMC,hhmmss.ss,A,....,ddmmyy,,,A" — 12 fields.
+    /// Spec: "$GPRMC,hhmmss.ss,A,....,ddmmyy,,,A" , 12 fields.
     #[test]
     fn rmc_nmea23_field_count() {
         let evs = feed(&nmea_wire(
@@ -250,7 +250,7 @@ mod neo6 {
 }
 
 // ===========================================================================
-// NEO-7M — u-blox 7, protocol 14. GPS+GLONASS (non-concurrent), NAV-PVT (84 B).
+// NEO-7M: u-blox 7, protocol 14. GPS+GLONASS (non-concurrent), NAV-PVT (84 B).
 // ===========================================================================
 mod neo7 {
     use super::*;
@@ -262,13 +262,16 @@ mod neo7 {
         assert_eq!(caps.generation, Generation::Series7);
         assert_eq!(caps.protocol_version, 14);
         assert!(caps.has_nav_pvt(), "NAV-PVT introduced with protocol 14");
-        assert!(!caps.has_cfg_gnss(), "constellation switching is 8-series+");
+        assert!(
+            caps.has_cfg_gnss(),
+            "CFG-GNSS is a section of the u-blox 7 spec (GPS.G7-SW-12001 section 35.4)"
+        );
         assert_eq!(caps.max_rate_ms(), 100);
     }
 
     /// Regression for a real bug found while reading the specs: u-blox 7
     /// NAV-PVT is 84 bytes (GPS.G7-SW-12001), not 92. The parser must
-    /// accept it — all decoded fields lie within the first 84 bytes.
+    /// accept it, since all decoded fields lie within the first 84 bytes.
     #[test]
     fn nav_pvt_84_bytes_parses() {
         let mut p = [0u8; 84];
@@ -312,7 +315,7 @@ mod neo7 {
 }
 
 // ===========================================================================
-// NEO-8M / NEO-M8N — u-blox 8/M8, protocols 15.00–23.01. Concurrent GNSS,
+// NEO-8M / NEO-M8N: u-blox 8/M8, protocols 15.00-23.01. Concurrent GNSS,
 // GN main talker, NMEA 4.0/4.1, 92-byte NAV-PVT.
 // ===========================================================================
 mod neo8 {
@@ -359,7 +362,10 @@ mod neo8 {
             assert_eq!(caps.protocol_version, protver, "exts {:?}", exts);
             assert_eq!(caps.generation, Generation::Series8, "exts {:?}", exts);
             assert!(caps.has_nav_pvt() && caps.has_cfg_gnss());
-            assert_eq!(caps.max_rate_ms(), 100);
+            // NEO-M8 datasheet: 5 Hz with the default GPS + GLONASS pair,
+            // 10 Hz on one constellation.
+            assert_eq!(caps.max_rate_ms(), 200);
+            assert_eq!(caps.max_rate_ms_single_gnss(), 100);
         }
     }
 
@@ -504,19 +510,27 @@ mod m9_m10 {
             &["FWVER=SPG 5.10", "PROTVER=34.10", "MOD=MAX-M10S"],
             "ROM SPG 5.10",
         );
-        assert_eq!(caps.generation, Generation::Series9Plus);
+        assert_eq!(caps.generation, Generation::Series10);
         assert_eq!(caps.protocol_version, 34);
-        assert_eq!(caps.max_rate_ms(), 40);
+        // MAX-M10 datasheet: 10 Hz with 3+ concurrent GNSS, 25 Hz on one.
+        assert_eq!(caps.max_rate_ms(), 100);
+        assert_eq!(caps.max_rate_ms_single_gnss(), 40);
+        // The whole legacy CFG class is gone at protocol 34.
+        assert!(!caps.has_legacy_cfg());
+        assert!(!caps.has_cfg_gnss());
     }
 
     /// NAV-SOL was removed from protocol 24 on: enable_nav_sol must refuse
     /// locally, and enable_binary_nav must route to NAV-PVT.
+    ///
+    /// Uses an M9, not an M10: the M10 has no `CFG-MSG` to route *to*, which
+    /// [`m10_has_no_legacy_cfg_messages`] covers separately.
     #[test]
     fn nav_sol_refused_binary_nav_uses_pvt() {
         let mut rx = ubx_wire(
             ubx::CLASS_MON,
             ubx::MON_VER,
-            &mon_ver_payload("ROM SPG 5.10", "00190000", &["PROTVER=34.10"]),
+            &mon_ver_payload("ROM CORE 4.04", "00190000", &["PROTVER=32.01"]),
         );
         rx.extend(ubx_wire(
             ubx::CLASS_ACK,
@@ -538,7 +552,53 @@ mod m9_m10 {
     #[test]
     fn m9_protver_32() {
         let caps = probe_with(&["FWVER=SPG 4.04", "PROTVER=32.01"], "ROM CORE 4.04");
-        assert_eq!(caps.generation, Generation::Series9Plus);
+        assert_eq!(caps.generation, Generation::Series9);
+        // M9 still speaks the legacy CFG class; only M10 dropped it.
+        assert!(caps.has_legacy_cfg());
+        assert!(caps.has_cfg_gnss());
+    }
+
+    /// The M10 interface description's entire UBX-CFG class is CFG-CFG,
+    /// CFG-RST, CFG-VALDEL, CFG-VALGET and CFG-VALSET. `CFG-MSG` and friends
+    /// are gone, so every wrapper built on them must refuse locally instead of
+    /// sending a frame the module would NAK.
+    #[test]
+    fn m10_has_no_legacy_cfg_messages() {
+        let rx = ubx_wire(
+            ubx::CLASS_MON,
+            ubx::MON_VER,
+            &mon_ver_payload("ROM SPG 5.10", "00190000", &["PROTVER=34.10"]),
+        );
+        let mut gps = NeoGps::new(MockUart::new(rx));
+        let caps = block_on(gps.probe()).unwrap();
+        assert!(!caps.has_legacy_cfg());
+
+        let unsupported = Err(Error::Unsupported);
+        assert_eq!(block_on(gps.set_msg_rate(0xF0, 0x00, 1)), unsupported);
+        assert_eq!(block_on(gps.disable_nmea(0x03)), unsupported);
+        assert_eq!(block_on(gps.set_nav_rate_ms(1000)), unsupported);
+        assert_eq!(block_on(gps.enable_nav_pvt()), unsupported);
+        assert_eq!(block_on(gps.enable_nav_posllh()), unsupported);
+        assert_eq!(block_on(gps.enable_nav_velned()), unsupported);
+        assert_eq!(block_on(gps.enable_binary_nav()), unsupported);
+        assert_eq!(block_on(gps.set_baud(115_200)), unsupported);
+        assert_eq!(block_on(gps.set_power_save(true)), unsupported);
+        assert_eq!(
+            block_on(gps.set_dynamic_model(ubx::DynamicModel::Automotive)),
+            unsupported
+        );
+        assert_eq!(
+            block_on(gps.set_constellation(ubx::Constellation::Galileo, true)),
+            unsupported
+        );
+
+        // Nothing may have reached the wire beyond the MON-VER poll that
+        // `probe` sent, since a NAK is exactly what we are avoiding.
+        let tx = gps.free().tx;
+        assert!(
+            !tx.windows(2).any(|w| w == [ubx::CLASS_CFG, ubx::CFG_MSG]),
+            "a legacy CFG frame was written to an M10"
+        );
     }
 }
 

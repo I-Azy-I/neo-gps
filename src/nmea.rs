@@ -1,10 +1,7 @@
-//! Talker-agnostic NMEA 0183 parsing (versions 2.3 and 4.x).
+//! NMEA 0183 sentences, versions 2.3 and 4.x, from any talker.
 //!
-//! The talker ID (`GP` on a GPS-only NEO-6M, `GN`/`GL`/`GA`/`GB` on
-//! multi-GNSS 8-series and later) is captured but never used for dispatch:
-//! sentences are identified by their 3-letter type only. Field counts are not
-//! assumed, so NMEA 2.3 (NEO-6 default) and 4.0+ (NEO-8 default, which adds
-//! trailing fields to some sentences) both parse.
+//! Sentences are matched on their 3-letter type, so `GP`, `GN`, `GL`, `GA`
+//! and `GB` all work. The talker is reported but not used for dispatch.
 //!
 //! All values are integers:
 //! * latitude/longitude: 1e-7 degrees (`i32`, the UBX convention)
@@ -18,19 +15,30 @@ use crate::Event;
 /// GNSS fix quality from GGA field 6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixQuality {
+    /// No fix.
     NoFix,
+    /// Standard GNSS fix.
     Gps,
+    /// Differential GNSS fix.
     Dgps,
+    /// Precise positioning service.
     Pps,
+    /// RTK with integer ambiguities fixed.
     RtkFixed,
+    /// RTK with float ambiguities.
     RtkFloat,
+    /// Dead reckoning, not a GNSS position.
     Estimated,
+    /// Manually entered position.
     Manual,
+    /// Simulated position.
     Simulation,
+    /// A value this crate does not recognise.
     Other(u8),
 }
 
 impl FixQuality {
+    #[cfg(feature = "builtin-codec")]
     fn from_u8(v: u8) -> Self {
         match v {
             0 => FixQuality::NoFix,
@@ -46,6 +54,7 @@ impl FixQuality {
         }
     }
 
+    /// Whether this quality means the module has a position.
     ///
     /// # Example
     /// ```
@@ -56,35 +65,71 @@ impl FixQuality {
     pub fn has_fix(&self) -> bool {
         !matches!(self, FixQuality::NoFix)
     }
+
+    /// Whether this quality is a real GNSS position fix, as opposed to dead
+    /// reckoning, a manual or simulated position, or none at all.
+    ///
+    /// Stricter than [`has_fix`](Self::has_fix), and what
+    /// [`next_coordinate`](crate::NeoGps::next_coordinate) requires, so that a
+    /// GGA is judged as strictly as `RMC`'s status field and `NAV-PVT`'s
+    /// `gnssFixOK`.
+    ///
+    /// # Example
+    /// ```
+    /// use neo_gps::nmea::FixQuality;
+    /// assert!(FixQuality::Dgps.is_gnss_fix());
+    /// assert!(FixQuality::Estimated.has_fix()); // dead reckoning is a fix
+    /// assert!(!FixQuality::Estimated.is_gnss_fix()); // but not a GNSS one
+    /// assert!(!FixQuality::Simulation.is_gnss_fix());
+    /// ```
+    pub fn is_gnss_fix(&self) -> bool {
+        matches!(
+            self,
+            FixQuality::Gps
+                | FixQuality::Dgps
+                | FixQuality::Pps
+                | FixQuality::RtkFixed
+                | FixQuality::RtkFloat
+        )
+    }
 }
 
 /// UTC time of day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Time {
+    /// Hours, 0 to 23.
     pub hour: u8,
+    /// Minutes, 0 to 59.
     pub minute: u8,
+    /// Seconds, 0 to 59.
     pub second: u8,
+    /// Milliseconds within the second.
     pub millis: u16,
 }
 
 /// UTC date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Date {
+    /// Day of month, 1 to 31.
     pub day: u8,
+    /// Month, 1 to 12.
     pub month: u8,
-    /// Two-digit year as transmitted (add 2000 for this hardware's lifetime).
+    /// Two-digit year as transmitted. Add 2000.
     pub year: u8,
 }
 
-/// `xxGGA` — fix data.
+/// `xxGGA`: fix data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Gga {
+    /// UTC time of the fix.
     pub time: Option<Time>,
     /// Degrees * 1e7, positive north.
     pub lat_1e7: Option<i32>,
     /// Degrees * 1e7, positive east.
     pub lon_1e7: Option<i32>,
+    /// Fix quality from field 6.
     pub quality: FixQuality,
+    /// Satellites used in the solution.
     pub sats_in_use: u8,
     /// Horizontal dilution of precision * 100.
     pub hdop_1e2: Option<u16>,
@@ -94,36 +139,46 @@ pub struct Gga {
     pub geoid_sep_mm: Option<i32>,
 }
 
-/// `xxRMC` — recommended minimum.
+/// `xxRMC`: recommended minimum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rmc {
+    /// UTC time of the fix.
     pub time: Option<Time>,
     /// Status field 'A' = valid.
     pub valid: bool,
+    /// Degrees * 1e7, positive north.
     pub lat_1e7: Option<i32>,
+    /// Degrees * 1e7, positive east.
     pub lon_1e7: Option<i32>,
-    /// Speed over ground, mm/s (converted from knots).
+    /// Speed over ground, mm/s.
     pub speed_mm_s: Option<u32>,
     /// Course over ground, degrees * 1e5.
     pub course_1e5: Option<u32>,
+    /// UTC date of the fix.
     pub date: Option<Date>,
 }
 
-/// `xxGSA` — DOP and active satellites.
+/// `xxGSA`: DOP and active satellites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Gsa {
     /// 1 = no fix, 2 = 2D, 3 = 3D.
     pub fix_type: u8,
+    /// Position dilution of precision * 100.
     pub pdop_1e2: Option<u16>,
+    /// Horizontal dilution of precision * 100.
     pub hdop_1e2: Option<u16>,
+    /// Vertical dilution of precision * 100.
     pub vdop_1e2: Option<u16>,
 }
 
-/// Decoded NMEA sentences. `talker` is informational only.
+/// The sentences the built-in codec decodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sentence {
+    /// Fix data.
     Gga(Gga),
+    /// Recommended minimum.
     Rmc(Rmc),
+    /// DOP and active satellites.
     Gsa(Gsa),
 }
 
@@ -134,7 +189,7 @@ pub(crate) fn parse_line(line: &[u8]) -> Option<Event> {
         return None;
     }
 
-    // Split off and verify "*hh" checksum. u-blox always sends it; we require it.
+    // Split off and verify the "*hh" checksum, which u-blox always sends.
     let star = line.iter().rposition(|&b| b == b'*')?;
     let (body, ck) = (&line[..star], &line[star + 1..]);
     if ck.len() < 2 {
@@ -146,13 +201,13 @@ pub(crate) fn parse_line(line: &[u8]) -> Option<Event> {
         return None;
     }
 
-    // Header: 2-char talker + 3-char type (proprietary "P..." sentences are
-    // reported as NmeaOther with a "P?" pseudo-talker).
+    // Header: 2-char talker + 3-char type. Proprietary "P..." sentences get a
+    // "P?" pseudo-talker and come back as NmeaOther.
     let comma = body.iter().position(|&b| b == b',').unwrap_or(body.len());
     let head = &body[..comma];
     if head.len() != 5 {
         // e.g. $PUBX,...
-        let mut talker = [b'P', b'?'];
+        let mut talker = *b"P?";
         let mut mtype = [b'?'; 3];
         for (d, s) in talker.iter_mut().zip(head.iter()) {
             *d = *s;
@@ -182,13 +237,15 @@ pub(crate) fn parse_line(line: &[u8]) -> Option<Event> {
 }
 
 // ---------------------------------------------------------------------------
-// Field iteration & scalar parsing (integer-only, tolerant of empty fields)
+// Field iteration and integer parsing
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "builtin-codec")]
 struct Fields<'a> {
     rest: &'a [u8],
 }
 
+#[cfg(feature = "builtin-codec")]
 impl<'a> Fields<'a> {
     /// `rest` starts at the comma *before* the first field.
     fn new(rest: &'a [u8]) -> Self {
@@ -223,6 +280,7 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+#[cfg(feature = "builtin-codec")]
 /// Parse an unsigned decimal integer.
 fn parse_uint(s: &[u8]) -> Option<u64> {
     if s.is_empty() {
@@ -238,8 +296,8 @@ fn parse_uint(s: &[u8]) -> Option<u64> {
     Some(v)
 }
 
-/// Parse `ddd.ddd` into an integer scaled by 10^`scale`, with sign support.
-/// Extra fractional digits are truncated; missing ones are zero-padded.
+#[cfg(feature = "builtin-codec")]
+/// Parse a signed `ddd.ddd` as an integer scaled by 10^`scale`.
 fn parse_fixed(s: &[u8], scale: u32) -> Option<i64> {
     if s.is_empty() {
         return None;
@@ -276,6 +334,7 @@ fn parse_fixed(s: &[u8], scale: u32) -> Option<i64> {
 }
 
 /// `hhmmss.sss` → Time.
+#[cfg(feature = "builtin-codec")]
 fn parse_time(s: &[u8]) -> Option<Time> {
     if s.len() < 6 {
         return None;
@@ -307,6 +366,7 @@ fn parse_time(s: &[u8]) -> Option<Time> {
 }
 
 /// `ddmmyy` → Date.
+#[cfg(feature = "builtin-codec")]
 fn parse_date(s: &[u8]) -> Option<Date> {
     if s.len() != 6 {
         return None;
@@ -318,10 +378,8 @@ fn parse_date(s: &[u8]) -> Option<Date> {
     })
 }
 
-/// NMEA `(d)ddmm.mmmm(m)` + hemisphere → degrees * 1e7.
-///
-/// Integer math throughout: minutes are scaled to 1e7 then divided by 60
-/// with rounding, using i64 intermediates (no overflow: < 2^43).
+/// NMEA `(d)ddmm.mmmm(m)` plus hemisphere, as degrees * 1e7.
+#[cfg(feature = "builtin-codec")]
 fn parse_coord(field: &[u8], hemi: &[u8], deg_digits: usize) -> Option<i32> {
     if field.len() < deg_digits + 2 {
         return None;
@@ -342,6 +400,7 @@ fn parse_coord(field: &[u8], hemi: &[u8], deg_digits: usize) -> Option<i32> {
 // Sentence bodies
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "builtin-codec")]
 fn parse_gga(mut f: Fields) -> Option<Gga> {
     let time = f.next().and_then(parse_time);
     let lat_f = f.next()?;
@@ -357,7 +416,7 @@ fn parse_gga(mut f: Fields) -> Option<Gga> {
     let alt_msl_mm = f.next().and_then(|s| parse_fixed(s, 3)).map(|v| v as i32);
     let _alt_unit = f.next();
     let geoid_sep_mm = f.next().and_then(|s| parse_fixed(s, 3)).map(|v| v as i32);
-    // remaining fields (units, DGPS age/station) ignored — count varies by version
+    // remaining fields (units, DGPS age/station) ignored
 
     Some(Gga {
         time,
@@ -371,6 +430,7 @@ fn parse_gga(mut f: Fields) -> Option<Gga> {
     })
 }
 
+#[cfg(feature = "builtin-codec")]
 fn parse_rmc(mut f: Fields) -> Option<Rmc> {
     let time = f.next().and_then(parse_time);
     let valid = matches!(f.next(), Some(b"A"));
@@ -402,6 +462,7 @@ fn parse_rmc(mut f: Fields) -> Option<Rmc> {
     })
 }
 
+#[cfg(feature = "builtin-codec")]
 fn parse_gsa(mut f: Fields) -> Option<Gsa> {
     let _mode = f.next(); // A/M
     let fix_type = f.next().and_then(parse_uint).unwrap_or(1) as u8;
@@ -421,7 +482,7 @@ fn parse_gsa(mut f: Fields) -> Option<Gsa> {
         .next()
         .and_then(|s| parse_fixed(s, 2))
         .and_then(|v| u16::try_from(v).ok());
-    // NMEA 4.1+ appends systemId — ignored
+    // NMEA 4.1+ appends systemId, ignored
 
     Some(Gsa {
         fix_type,

@@ -1,29 +1,23 @@
-//! Adapters from this driver's framed output to external vocabulary crates.
+//! Hand the driver's frames to external decoding crates.
 //!
-//! The driver's own scope is transport: deframing the interleaved NMEA/UBX
-//! stream, checksums, the async/sync pump, ACK correlation, and family
-//! capability policy. Message *vocabulary* can be delegated:
-//!
-//! * feature `nmea` — the [`nmea`](https://crates.io/crates/nmea) crate
+//! * feature `nmea`: the [`nmea`](https://crates.io/crates/nmea) crate
 //!   decodes sentences from [`NeoGps::last_nmea_line`](crate::NeoGps::last_nmea_line).
-//! * feature `ublox` — the [`ublox`](https://crates.io/crates/ublox) crate
+//! * feature `ublox`: the [`ublox`](https://crates.io/crates/ublox) crate
 //!   decodes packets from [`NeoGps::last_ubx_frame`](crate::NeoGps::last_ubx_frame).
 //!
-//! With `default-features = false` plus `async`/`sync` and these codec
-//! features, the built-in decoders compile out entirely: every valid frame
-//! surfaces as `Event::NmeaOther` / `Event::UbxOther`, and these adapters
-//! supply the typed view.
+//! Turn off `builtin-codec` to use these on their own. Every valid frame then
+//! arrives as `Event::NmeaOther` or `Event::UbxOther` for you to decode here.
 
-/// External NMEA decoding via the `nmea` crate (feature `nmea`).
+/// NMEA decoding with the `nmea` crate. Needs the `nmea` feature.
 #[cfg(feature = "nmea")]
+#[cfg_attr(docsrs, doc(cfg(feature = "nmea")))]
 pub mod nmea {
     use nmea as nmea_crate;
 
-    /// Why an adapter call produced no result.
+    /// Why [`decode`] returned nothing.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum DecodeError {
-        /// Line exceeds the reassembly buffer (never happens for lines that
-        /// came out of this driver's deframer).
+        /// The line is longer than an NMEA sentence can be.
         TooLong,
         /// The line is not valid UTF-8.
         Utf8,
@@ -31,11 +25,10 @@ pub mod nmea {
         Parse,
     }
 
-    /// Decode one framed sentence with the `nmea` crate.
+    /// Decode one sentence with the `nmea` crate.
     ///
-    /// Input is exactly what [`last_nmea_line`](crate::NeoGps::last_nmea_line)
-    /// returns: the bytes between `$` and CR/LF, checksum trailer included.
-    /// The adapter re-adds the leading `$` the external crate expects.
+    /// Pass it [`last_nmea_line`](crate::NeoGps::last_nmea_line) as-is. The
+    /// leading `$` the external crate wants is added for you.
     ///
     /// # Example
     /// ```ignore
@@ -57,18 +50,18 @@ pub mod nmea {
     }
 }
 
-/// External UBX decoding via the `ublox` crate (feature `ublox`).
+/// UBX decoding with the `ublox` crate. Needs the `ublox` feature.
 #[cfg(feature = "ublox")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ublox")))]
 pub mod ublox {
     use ublox as ublox_crate;
 
-    /// Decode one complete framed UBX packet with the `ublox` crate,
-    /// handing the typed [`PacketRef`](ublox_crate::PacketRef) to a closure.
+    /// Decode one UBX packet with the `ublox` crate and pass it to `f`.
     ///
-    /// Input is exactly what [`last_ubx_frame`](crate::NeoGps::last_ubx_frame)
-    /// returns: sync bytes through checksum. The closure style is imposed by
-    /// the `ublox` parser's lifetimes (the packet borrows the parser's
-    /// buffer); returns `None` if the crate does not recognise the packet.
+    /// Pass it [`last_ubx_frame`](crate::NeoGps::last_ubx_frame) as-is: the
+    /// whole frame, sync bytes through checksum. `f` takes the packet because
+    /// it borrows the parser's buffer. `None` if the crate does not recognise
+    /// the packet.
     ///
     /// # Example
     /// ```ignore

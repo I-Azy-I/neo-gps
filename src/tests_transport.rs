@@ -1,6 +1,6 @@
 //! Transport-resilience tests: UART read errors (framing violations, noise,
 //! the power-up floating-line glitch) must be absorbed like garbage bytes,
-//! not propagated as link failure. Compiled for every feature combination —
+//! not propagated as link failure. Compiled for every feature combination,
 //! these exercise the ungated transport layer only.
 
 use crate::testutil::*;
@@ -71,7 +71,7 @@ fn intermittent_glitches_never_trip_threshold() {
     let mut gps = NeoGps::new(uart);
     // Before each frame, a burst at the tolerance: successful reads in
     // between reset the streak, so this must never surface Io. (Bursts are
-    // aligned to frame boundaries — the realistic power-up pattern, where
+    // aligned to frame boundaries, the realistic power-up pattern, where
     // the parser is idle and the glitch damages no frame in progress.)
     for _ in 0..4 {
         gps.uart_mut().fail_next_reads = DEFAULT_READ_ERROR_TOLERANCE as usize;
@@ -95,7 +95,7 @@ fn intermittent_glitches_never_trip_threshold() {
 fn reset_prevents_bogus_length_trap() {
     let good = ubx_wire(ubx::CLASS_ACK, 0x01, &[0x06, 0x08]);
     // Read #0 delivers a frame fragment ending inside the header (sync +
-    // class + id + len_lo) — the glitch then hits where len_hi would be.
+    // class + id + len_lo), so the glitch hits where len_hi would be.
     let mut rx = good[..5].to_vec();
     rx.extend(&good);
     let mut uart = MockUart::new(rx);
@@ -126,7 +126,7 @@ fn tolerance_zero_is_fail_fast() {
     assert!(matches!(block_on(gps.next_event()), Ok(Event::Ack { .. })));
 }
 
-/// Ok(0) (closed port on adapted transports) must stay immediately fatal —
+/// Ok(0) (closed port on adapted transports) must stay immediately fatal,
 /// retrying an EOF spins forever.
 #[test]
 fn eof_is_not_retried() {
@@ -140,7 +140,7 @@ fn eof_is_not_retried() {
 #[test]
 fn probe_repolls_when_first_poll_lost() {
     // Script the module as if it never saw poll #1: it emits chatter frames
-    // only, then answers — but only after enough frames have passed that the
+    // only, then answers, but only after enough frames have passed that the
     // driver must have re-polled (budget/2 chatter frames first).
     let mut rx = Vec::new();
     for _ in 0..(64 / 2) {

@@ -25,6 +25,7 @@ pub(crate) fn ubx_wire(class: u8, id: u8, payload: &[u8]) -> Vec<u8> {
     v
 }
 
+#[cfg(feature = "builtin-codec")]
 pub(crate) fn feed(bytes: &[u8]) -> Vec<Event> {
     let mut d = Deframer::new();
     bytes.iter().filter_map(|&b| d.push(b)).collect()
@@ -49,7 +50,7 @@ pub(crate) struct MockUart {
     pub(crate) rx: Vec<u8>,
     pub(crate) pos: usize,
     pub(crate) tx: Vec<u8>,
-    /// Max bytes delivered per read() — exercises chunk-boundary handling.
+    /// Max bytes per read(), for exercising chunk boundaries.
     pub(crate) chunk: usize,
     /// The next N calls to read() return Err (scripted UART glitches).
     pub(crate) fail_next_reads: usize,
